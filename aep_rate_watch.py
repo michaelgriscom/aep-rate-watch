@@ -19,6 +19,7 @@ import sys
 import time
 from pathlib import Path
 
+import apprise
 import requests
 import urllib3
 from bs4 import BeautifulSoup
@@ -60,7 +61,9 @@ MAX_TERM_MONTHS = env_int("MAX_TERM_MONTHS", 36)
 
 MONTHLY_KWH = env_int("MONTHLY_KWH", 1000)
 
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
+# Apprise URL(s), comma-separated -- e.g. a Discord webhook as
+# discord://<id>/<token>, ntfy://, etc. See github.com/caronc/apprise.
+NOTIFY_URL = os.environ.get("NOTIFY_URL", "")
 
 # energychoice.ohio.gov serves an incomplete cert chain (missing Sectigo
 # intermediate). Verification fails everywhere -- not just in this container.
@@ -143,16 +146,14 @@ def eligible(o):
 
 
 def notify(title, body):
-    if not NTFY_TOPIC:
-        print(f"NOTIFY (no NTFY_TOPIC set): {title}\n{body}", file=sys.stderr)
+    if not NOTIFY_URL:
+        print(f"NOTIFY (no NOTIFY_URL set): {title}\n{body}", file=sys.stderr)
         return
     try:
-        requests.post(
-            NTFY_TOPIC,
-            data=body.encode("utf-8"),
-            headers={"Title": title, "Priority": "high", "Tags": "zap"},
-            timeout=15,
-        )
+        ap = apprise.Apprise()
+        ap.add([u.strip() for u in NOTIFY_URL.split(",") if u.strip()])
+        if not ap.notify(title=title, body=body):
+            print(f"notify failed for: {title}", file=sys.stderr)
     except Exception as e:
         print(f"notify failed: {e}", file=sys.stderr)
 
