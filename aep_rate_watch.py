@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 
 
@@ -61,6 +62,11 @@ MONTHLY_KWH = env_int("MONTHLY_KWH", 1000)
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
 
+# energychoice.ohio.gov serves an incomplete cert chain (missing Sectigo
+# intermediate). Verification fails everywhere -- not just in this container.
+# Default off; flip back on if/when Ohio fixes their server.
+VERIFY_SSL = env_bool("VERIFY_SSL", False)
+
 # 0 = run once and exit; >0 = sleep this many seconds between polls.
 POLL_INTERVAL = env_int("POLL_INTERVAL", 0)
 # ----------------------------------------------------------------
@@ -85,7 +91,9 @@ def num(s):
 
 
 def fetch_offers():
-    r = requests.get(URL, headers=HEADERS, timeout=30)
+    if not VERIFY_SSL:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    r = requests.get(URL, headers=HEADERS, timeout=30, verify=VERIFY_SSL)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
 
@@ -97,7 +105,8 @@ def fetch_offers():
         if "kwh" not in header:
             continue
         for row in table.find_all("tr"):
-            cells = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+            tds = row.find_all("td")
+            cells = [td.get_text(" ", strip=True) for td in tds]
             if len(cells) <= COL["fee"]:
                 continue
             rate = num(cells[COL["rate"]])
@@ -105,8 +114,13 @@ def fetch_offers():
                 continue
             etf = num(cells[COL["etf"]])
             fee = num(cells[COL["fee"]])
+            supplier_lines = [
+                ln.strip()
+                for ln in tds[COL["supplier"]].get_text("\n", strip=True).splitlines()
+                if ln.strip()
+            ]
             offers.append({
-                "supplier": cells[COL["supplier"]].split("\n")[0].strip(),
+                "supplier": supplier_lines[0] if supplier_lines else cells[COL["supplier"]],
                 "rate": rate,
                 "fixed": "fixed" in cells[COL["rate_type"]].lower(),
                 "term": num(cells[COL["term"]]),
