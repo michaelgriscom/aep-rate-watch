@@ -64,6 +64,8 @@ MONTHLY_KWH = env_int("MONTHLY_KWH", 1000)
 # Apprise URL(s), comma-separated -- e.g. a Discord webhook as
 # discord://<id>/<token>, ntfy://, etc. See github.com/caronc/apprise.
 NOTIFY_URL = os.environ.get("NOTIFY_URL", "")
+# Uptime Kuma push monitor heartbeat (optional); pushed after each successful check.
+KUMA_PUSH_URL = os.environ.get("KUMA_PUSH_URL", "")
 
 # energychoice.ohio.gov serves an incomplete cert chain (missing Sectigo
 # intermediate). Verification fails everywhere -- not just in this container.
@@ -158,6 +160,16 @@ def notify(title, body):
         print(f"notify failed: {e}", file=sys.stderr)
 
 
+def kuma_push(status="up", msg="OK"):
+    """Send an Uptime Kuma heartbeat (no-op if KUMA_PUSH_URL unset)."""
+    if not KUMA_PUSH_URL:
+        return
+    try:
+        requests.get(KUMA_PUSH_URL, params={"status": status, "msg": msg}, timeout=15)
+    except Exception as e:
+        print(f"kuma push failed: {e}", file=sys.stderr)
+
+
 def check_once():
     offers = [o for o in fetch_offers() if eligible(o)]
     if not offers:
@@ -198,6 +210,7 @@ def check_once():
         "best_supplier": best["supplier"],
         "best_term": best["term"],
     }))
+    kuma_push("up", f"best {best['rate']:.4f}/kWh")   # heartbeat: check succeeded
     return 0
 
 
